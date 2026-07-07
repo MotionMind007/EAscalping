@@ -1,0 +1,31 @@
+# Hypothesis database
+.hypothesis/
+
+# Pytest cache
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pycache
+
+# Kiro internal files
+.kiro/
+
+# Python virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# MQL5 compiled files
+*.ex5
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
