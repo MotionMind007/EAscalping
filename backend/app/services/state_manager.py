@@ -98,7 +98,7 @@ class StateManager:
             )
 
         # 2. Evaluate business conditions
-        approved, reject_reason, command = self._evaluate_conditions(
+        approved, reject_reason, command = await self._evaluate_conditions(
             current_state, requested_state
         )
 
