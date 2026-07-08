@@ -9,6 +9,11 @@
 #property strict
 
 //+------------------------------------------------------------------+
+//| Global state - defined before includes so modules can access it    |
+//+------------------------------------------------------------------+
+EAState g_currentState = STATE_BOOT;
+
+//+------------------------------------------------------------------+
 //| Include all modules                                                |
 //+------------------------------------------------------------------+
 #include <EAGateway\Types.mqh>
@@ -49,11 +54,6 @@ CSessionManager*      g_sessionManager   = NULL;
 CRecoveryManager*     g_recoveryManager  = NULL;
 CSessionAbortHandler* g_sessionAbortHandler = NULL;
 CCommandDispatcher*   g_commandDispatcher = NULL;
-
-//+------------------------------------------------------------------+
-//| Global state variable (accessed by modules via extern)            |
-//+------------------------------------------------------------------+
-EAState g_currentState = STATE_BOOT;
 
 //+------------------------------------------------------------------+
 //| Timer counters (1-second resolution, track elapsed seconds)       |

@@ -109,9 +109,3 @@ struct HeartbeatPayload
 };
 
 #endif // EA_GATEWAY_TYPES_MQH
-
-//+------------------------------------------------------------------+
-//| Forward declaration for global state (defined in EAGateway.mq5)    |
-//+------------------------------------------------------------------+
-// Modules access this directly instead of using pointers
-extern EAState g_currentState;
