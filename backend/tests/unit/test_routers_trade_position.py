@@ -1,6 +1,6 @@
 """Unit tests for trade and position routers (Tasks 3.6, 3.7).
 
-Uses FastAPI TestClient with mocked Redis dependency to test endpoint
+Uses FastAPI TestClient with mocked dependencies to test endpoint
 validation, auth, and response structure without requiring real services.
 """
 import json
@@ -11,6 +11,8 @@ from httpx import ASGITransport, AsyncClient
 
 from app.dependencies import get_redis, verify_auth_token
 from app.main import app
+from app.routers import position
+from app.services import PositionManager
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -25,12 +27,33 @@ def mock_redis():
 
 
 @pytest.fixture
-def client(mock_redis):
+def mock_position_manager():
+    """Provide a mock PositionManager instance for dependency injection."""
+    pm = AsyncMock(spec=PositionManager)
+    pm.update_position_status = AsyncMock()
+    pm.get_known_tickets = AsyncMock(return_value=[])
+    pm.handle_orphan = AsyncMock()
+    return pm
+
+
+@pytest.fixture
+def client(mock_redis, mock_position_manager):
     """Create async test client with mocked dependencies."""
+    import os
+    os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test_db")
+    os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+    os.environ.setdefault("AUTH_TOKEN", "test-token-secret")
+    from app.dependencies import get_settings
+    get_settings.cache_clear()
+
     app.dependency_overrides[get_redis] = lambda: mock_redis
     app.dependency_overrides[verify_auth_token] = lambda: None
+    app.dependency_overrides[get_settings] = lambda: get_settings()
+    # Override PositionManager dependency by the function itself
+    app.dependency_overrides[position.get_position_manager] = lambda: mock_position_manager
     yield
     app.dependency_overrides.clear()
+    get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -44,7 +67,13 @@ def unauth_client():
     get_settings.cache_clear()
 
     mock_redis = AsyncMock()
+    mock_position_manager = AsyncMock(spec=PositionManager)
+    mock_position_manager.update_position_status = AsyncMock()
+    mock_position_manager.get_known_tickets = AsyncMock(return_value=[])
+    mock_position_manager.handle_orphan = AsyncMock()
+    
     app.dependency_overrides[get_redis] = lambda: mock_redis
+    app.dependency_overrides[position.get_position_manager] = lambda: mock_position_manager
     yield
     app.dependency_overrides.clear()
     get_settings.cache_clear()
@@ -127,7 +156,7 @@ class TestTradeRouter:
 class TestPositionStatusRouter:
     """Tests for POST /api/v1/position/status."""
 
-    async def test_position_status_valid(self, client, mock_redis):
+    async def test_position_status_valid(self, client, mock_position_manager):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             payload = {
                 "ticket": 12345,
@@ -142,13 +171,7 @@ class TestPositionStatusRouter:
             response = await ac.post("/api/v1/position/status", json=payload)
         assert response.status_code == 200
         assert response.json() == {}
-        mock_redis.set.assert_called_once()
-        call_args = mock_redis.set.call_args
-        assert call_args[0][0] == "position:open"
-        stored = json.loads(call_args[0][1])
-        assert stored["ticket"] == 12345
-        assert stored["symbol"] == "XAUUSD"
-        assert stored["direction"] == "BUY"
+        mock_position_manager.update_position_status.assert_awaited_once()
 
     async def test_position_status_invalid_direction(self, client):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -185,13 +208,8 @@ class TestPositionStatusRouter:
 class TestPositionKnownRouter:
     """Tests for POST /api/v1/position/known."""
 
-    async def test_known_with_open_position(self, client, mock_redis):
-        mock_redis.get.return_value = json.dumps({
-            "ticket": 12345,
-            "symbol": "XAUUSD",
-            "direction": "BUY",
-            "lot_size": 0.10,
-        })
+    async def test_known_with_open_position(self, client, mock_position_manager):
+        mock_position_manager.get_known_tickets.return_value = [12345]
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             payload = {"symbol": "XAUUSD"}
             response = await ac.post("/api/v1/position/known", json=payload)
@@ -199,8 +217,8 @@ class TestPositionKnownRouter:
         data = response.json()
         assert data["tickets"] == [12345]
 
-    async def test_known_no_open_position(self, client, mock_redis):
-        mock_redis.get.return_value = None
+    async def test_known_no_open_position(self, client, mock_position_manager):
+        mock_position_manager.get_known_tickets.return_value = []
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             payload = {"symbol": "XAUUSD"}
             response = await ac.post("/api/v1/position/known", json=payload)
@@ -219,7 +237,14 @@ class TestPositionKnownRouter:
 class TestPositionOrphanRouter:
     """Tests for POST /api/v1/position/orphan."""
 
-    async def test_orphan_returns_close_command(self, client):
+    async def test_orphan_returns_close_command(self, client, mock_position_manager):
+        mock_position_manager.handle_orphan.return_value = {
+            "type": "CLOSE",
+            "lot_size": 0.10,
+            "stop_loss": 0.01,
+            "take_profit": 0.01,
+            "ticket": 99999,
+        }
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             payload = {
                 "ticket": 99999,

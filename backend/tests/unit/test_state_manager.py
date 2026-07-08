@@ -49,13 +49,24 @@ def mock_risk_engine():
     return engine
 
 
+@pytest.fixture
+def mock_position_manager():
+    """Mocked PositionManager."""
+    manager = AsyncMock()
+    manager.has_open_position = AsyncMock(return_value=False)
+    return manager
+
+
 @pytest_asyncio.fixture
-async def state_manager(mock_redis, mock_settings, mock_risk_engine):
+async def state_manager(mock_redis, mock_settings, mock_risk_engine, mock_signal_engine, mock_trade_orchestrator, mock_position_manager):
     """StateManager with mocked dependencies."""
     return StateManager(
         redis=mock_redis,
         settings=mock_settings,
         risk_engine=mock_risk_engine,
+        signal_engine=mock_signal_engine,
+        trade_orchestrator=mock_trade_orchestrator,
+        position_manager=mock_position_manager,
     )
 
 

@@ -12,7 +12,10 @@ from redis.asyncio import Redis
 from app.config import Settings
 from app.models.enums import EAState
 from app.models.responses import TradeCommand, TransitionResponse
+from app.services.position_manager import PositionManager
 from app.services.risk_engine import RiskEngine
+from app.services.signal_engine import SignalEngine
+from app.services.trade_orchestrator import TradeOrchestrator
 
 
 class StateManager:
@@ -22,6 +25,9 @@ class StateManager:
         redis: Async Redis client for state persistence.
         settings: Application settings with session hours.
         risk_engine: RiskEngine instance for risk status checks.
+        signal_engine: SignalEngine instance for signal detection.
+        trade_orchestrator: TradeOrchestrator instance for command construction.
+        position_manager: PositionManager instance for position tracking.
     """
 
     # Valid FSM transitions as (from_state, to_state) pairs
@@ -50,11 +56,17 @@ class StateManager:
         self,
         redis: Redis,
         settings: Settings,
-        risk_engine: Optional[RiskEngine] = None,
+        risk_engine: RiskEngine,
+        signal_engine: SignalEngine,
+        trade_orchestrator: TradeOrchestrator,
+        position_manager: PositionManager,
     ) -> None:
         self._redis = redis
         self._settings = settings
         self._risk_engine = risk_engine
+        self._signal_engine = signal_engine
+        self._trade_orchestrator = trade_orchestrator
+        self._position_manager = position_manager
 
     async def process_transition(
         self,
@@ -144,19 +156,30 @@ class StateManager:
         if current_state == "CHECK_RISK" and requested_state == "SCAN_SIGNAL":
             if not self.is_in_session(utc_now):
                 return False, "Outside trading session window", None
-            if self._risk_engine:
-                status = await self._risk_engine.get_status()
-                if status != "CLEAR":
-                    return False, "Risk status is RISK_LOCK", None
+            status = await self._risk_engine.get_status()
+            if status != "CLEAR":
+                return False, "Risk status is RISK_LOCK", None
             return True, None, None
 
         # CHECK_RISK → WAIT_SESSION: always approve (fallback)
         if current_state == "CHECK_RISK" and requested_state == "WAIT_SESSION":
             return True, None, None
 
-        # SCAN_SIGNAL → AI_CONFIRMATION: signal detected (approve in MVP)
+        # SCAN_SIGNAL → AI_CONFIRMATION: signal detected, construct TradeCommand
         if current_state == "SCAN_SIGNAL" and requested_state == "AI_CONFIRMATION":
-            return True, None, None
+            # Get signal from SignalEngine
+            signal = await self._signal_engine.check_signal(
+                candles=[],  # Will be provided by caller in real implementation
+                current_tick=None,  # Will be provided by caller in real implementation
+                utc_now=utc_now,
+                has_open_position=await self._position_manager.has_open_position(),
+                settings=self._settings,
+            )
+            if signal is not None:
+                # Construct TradeCommand
+                command = self._trade_orchestrator.construct_trade_command(signal)
+                return True, None, command
+            return False, "No signal detected", None
 
         # SCAN_SIGNAL → WAIT_SESSION: always approve (no signal found)
         if current_state == "SCAN_SIGNAL" and requested_state == "WAIT_SESSION":
@@ -179,8 +202,12 @@ class StateManager:
             await self._redis.delete(self.KEY_TRADE_RESULT_SUCCESS)
             return True, None, None
 
-        # MANAGE_POSITION → POSITION_CLOSED: always approve
+        # MANAGE_POSITION → POSITION_CLOSED: record P&L and always approve
         if current_state == "MANAGE_POSITION" and requested_state == "POSITION_CLOSED":
+            # Retrieve trade result to get P&L (simplified for MVP)
+            # In real implementation, this would fetch the actual P&L from the trade result
+            pnl = 0.0  # Placeholder - would be retrieved from actual trade execution
+            await self._risk_engine.record_trade_pnl(pnl)
             return True, None, None
 
         # POSITION_CLOSED → WAIT_SESSION: always approve

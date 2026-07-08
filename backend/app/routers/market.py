@@ -8,8 +8,10 @@ import logging
 
 from fastapi import APIRouter, Depends
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_redis, verify_auth_token
+from app.dependencies import get_db, get_redis, verify_auth_token
+from app.db.repository import Repository
 from app.models.requests import CandlePayload, TickPayload
 
 logger = logging.getLogger(__name__)
@@ -49,12 +51,13 @@ async def receive_tick(
 async def receive_candle(
     payload: CandlePayload,
     redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Store candle data in Redis candle buffer.
+    """Store candle data in Redis candle buffer and PostgreSQL.
 
     Appends candle to Redis list `market:candles:{symbol}:{timeframe}` and
     trims to keep only the latest 100 candles (rolling buffer).
-    PostgreSQL persistence is wired in a later wave.
+    Also inserts into PostgreSQL candles table for persistent storage.
     """
     candle_data = json.dumps({
         "symbol": payload.symbol,
@@ -69,5 +72,24 @@ async def receive_candle(
     key = f"market:candles:{payload.symbol}:{payload.timeframe}"
     await redis.rpush(key, candle_data)
     await redis.ltrim(key, -100, -1)  # Keep last 100 candles
+    
+    # Insert into PostgreSQL for persistent storage
+    repo = Repository(db)
+    from app.db.models import Candle
+    from datetime import datetime
+    
+    candle_record = Candle(
+        symbol=payload.symbol,
+        timeframe=payload.timeframe,
+        timestamp=datetime.fromisoformat(payload.timestamp.replace("Z", "+00:00")),
+        open=payload.open,
+        high=payload.high,
+        low=payload.low,
+        close=payload.close,
+        volume=payload.volume,
+    )
+    db.add(candle_record)
+    await db.flush()
+    
     logger.debug("Stored candle for %s %s at %s", payload.symbol, payload.timeframe, payload.timestamp)
     return {}

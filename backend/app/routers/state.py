@@ -43,38 +43,46 @@ async def state_transition(
 ) -> TransitionResponse:
     """Process EA state transition request.
 
-    Placeholder implementation: approves all transitions that exist in the
-    valid transitions set. Business condition checks (risk, signal, session)
-    are wired in Wave 3 via the StateManager service.
+    Uses StateManager service to evaluate business conditions for
+    each transition. Dependencies are injected via factory pattern.
     """
     current = payload.current_state.value
     requested = payload.requested_state.value
 
-    # Check if transition is valid in the FSM table
-    if (current, requested) not in VALID_TRANSITIONS:
-        logger.info(
-            "Rejected invalid transition: %s -> %s (reason: %s)",
-            current, requested, payload.reason,
-        )
-        return TransitionResponse(
-            approved=False,
-            new_state=payload.current_state,
-            reason=f"Invalid transition: {current} -> {requested}",
-        )
+    # Get settings and create services
+    from app.config import Settings
+    from app.services.position_manager import PositionManager
+    from app.services.risk_engine import RiskEngine
+    from app.services.signal_engine import SignalEngine
+    from app.services.state_manager import StateManager
+    from app.services.trade_orchestrator import TradeOrchestrator
 
-    # Placeholder: approve all valid transitions
-    # Real business logic (session check, risk check, signal check) comes in Wave 3
-    await redis.set("ea:state", requested, ex=120)  # Persist state with 120s TTL
+    settings = Settings()
+    risk_engine = RiskEngine(redis, settings)
+    signal_engine = SignalEngine()
+    trade_orchestrator = TradeOrchestrator(redis, settings)
+    position_manager = PositionManager(redis)
+    state_manager = StateManager(
+        redis=redis,
+        settings=settings,
+        risk_engine=risk_engine,
+        signal_engine=signal_engine,
+        trade_orchestrator=trade_orchestrator,
+        position_manager=position_manager,
+    )
+
+    # Process transition through StateManager
+    response = await state_manager.process_transition(
+        current_state=current,
+        requested_state=requested,
+        reason=payload.reason,
+    )
 
     logger.info(
-        "Approved transition: %s -> %s (reason: %s)",
-        current, requested, payload.reason,
+        "Transition %s -> %s: approved=%s, reason=%s",
+        current, requested, response.approved, response.reason or "N/A"
     )
-    return TransitionResponse(
-        approved=True,
-        new_state=payload.requested_state,
-        command=None,
-    )
+    return response
 
 
 @router.post("/recovery", dependencies=[Depends(verify_auth_token)])

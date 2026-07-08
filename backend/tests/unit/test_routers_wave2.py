@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.dependencies import get_redis, verify_auth_token
+from app.dependencies import get_db, get_redis, verify_auth_token
 from app.main import app
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -33,9 +33,20 @@ def mock_redis():
 
 
 @pytest.fixture
-def client(mock_redis):
+def mock_db():
+    """Provide a mock database session for dependency injection."""
+    db = AsyncMock()
+    db.add = lambda x: None  # add() is synchronous
+    db.flush = AsyncMock()
+    db.refresh = AsyncMock()
+    return db
+
+
+@pytest.fixture
+def client(mock_redis, mock_db):
     """Create async test client with mocked dependencies."""
     app.dependency_overrides[get_redis] = lambda: mock_redis
+    app.dependency_overrides[get_db] = lambda: mock_db
     app.dependency_overrides[verify_auth_token] = lambda: None
     yield
     app.dependency_overrides.clear()
