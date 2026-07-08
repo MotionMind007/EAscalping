@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     take_profit_points: int = Field(default=150, ge=10, le=1000, description="Take profit in points")
     max_daily_loss_pct: float = Field(default=3.0, ge=0.1, le=100.0, description="Max daily loss percentage")
 
+    # Trading instrument
+    symbol: str = Field(default="XAUUSD", description="Trading symbol")
+    timeframe: str = Field(default="M5", description="Chart timeframe for candle data")
+
     # Indicator parameters
     ema_fast_period: int = Field(default=9, ge=2, le=200, description="EMA fast period")
     ema_slow_period: int = Field(default=21, ge=2, le=200, description="EMA slow period")

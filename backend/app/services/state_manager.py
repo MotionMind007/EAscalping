@@ -4,6 +4,7 @@ Controls EA state transitions by validating against the FSM table and
 evaluating business conditions per transition. Persists state in Redis
 with a 120-second TTL.
 """
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -14,7 +15,7 @@ from app.models.enums import EAState
 from app.models.responses import TradeCommand, TransitionResponse
 from app.services.position_manager import PositionManager
 from app.services.risk_engine import RiskEngine
-from app.services.signal_engine import SignalEngine
+from app.services.signal_engine import Candle, SignalEngine, Tick
 from app.services.trade_orchestrator import TradeOrchestrator
 
 
@@ -167,10 +168,24 @@ class StateManager:
 
         # SCAN_SIGNAL → AI_CONFIRMATION: signal detected, construct TradeCommand
         if current_state == "SCAN_SIGNAL" and requested_state == "AI_CONFIRMATION":
+            # Read candle buffer from Redis (rolling buffer stored by market router)
+            candles_key = f"market:candles:{self._settings.symbol}:{self._settings.timeframe}"
+            raw_candles = await self._redis.lrange(candles_key, 0, -1)
+            candles = [Candle(close=c["close"]) for c in (json.loads(c) for c in raw_candles)]
+
+            # Read latest tick from Redis (stored by market router)
+            tick_key = f"market:tick:{self._settings.symbol}"
+            raw_tick = await self._redis.get(tick_key)
+            if raw_tick:
+                t = json.loads(raw_tick)
+                current_tick = Tick(bid=t["bid"], ask=t["ask"], spread=t["spread"])
+            else:
+                current_tick = None
+
             # Get signal from SignalEngine (synchronous method)
             signal = self._signal_engine.check_signal(
-                candles=[],  # Will be provided by caller in real implementation
-                current_tick=None,  # Will be provided by caller in real implementation
+                candles=candles,
+                current_tick=current_tick,
                 utc_now=utc_now,
                 has_open_position=await self._position_manager.has_open_position(),
                 settings=self._settings,
@@ -204,10 +219,15 @@ class StateManager:
 
         # MANAGE_POSITION → POSITION_CLOSED: record P&L and always approve
         if current_state == "MANAGE_POSITION" and requested_state == "POSITION_CLOSED":
-            # Retrieve trade result to get P&L (simplified for MVP)
-            # In real implementation, this would fetch the actual P&L from the trade result
-            pnl = 0.0  # Placeholder - would be retrieved from actual trade execution
+            # Retrieve actual P&L from the position stored in Redis by PositionManager
+            pnl = 0.0
+            raw_position = await self._redis.get(self._position_manager.KEY_POSITION)
+            if raw_position:
+                position_data = json.loads(raw_position)
+                pnl = position_data.get("unrealized_pnl", 0.0)
             await self._risk_engine.record_trade_pnl(pnl)
+            # Mark position as closed in PositionManager
+            await self._position_manager.mark_position_closed()
             return True, None, None
 
         # POSITION_CLOSED → WAIT_SESSION: always approve
