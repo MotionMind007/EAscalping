@@ -98,7 +98,7 @@ class StateManager:
             )
 
         # 2. Evaluate business conditions
-        approved, reject_reason, command = await self._evaluate_conditions(
+        approved, reject_reason, command = self._evaluate_conditions(
             current_state, requested_state
         )
 
@@ -167,8 +167,8 @@ class StateManager:
 
         # SCAN_SIGNAL → AI_CONFIRMATION: signal detected, construct TradeCommand
         if current_state == "SCAN_SIGNAL" and requested_state == "AI_CONFIRMATION":
-            # Get signal from SignalEngine
-            signal = await self._signal_engine.check_signal(
+            # Get signal from SignalEngine (synchronous method)
+            signal = self._signal_engine.check_signal(
                 candles=[],  # Will be provided by caller in real implementation
                 current_tick=None,  # Will be provided by caller in real implementation
                 utc_now=utc_now,
