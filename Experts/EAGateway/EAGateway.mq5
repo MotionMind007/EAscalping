@@ -35,10 +35,12 @@ EAState g_currentState = STATE_BOOT;
 //+------------------------------------------------------------------+
 #define HEARTBEAT_ENDPOINT         "/api/v1/health/heartbeat"
 #define POSITION_STATUS_ENDPOINT   "/api/v1/position/status"
+#define STATE_TRANSITION_ENDPOINT  "/api/v1/state/transition"
 #define SESSION_CHECK_INTERVAL_SEC 60
 #define ORPHAN_CHECK_INTERVAL_SEC  60
 #define POSITION_REPORT_SEC        5
 #define MT5_CONNECTIVITY_SEC       1
+#define SIGNAL_SCAN_INTERVAL_SEC   3    // Poll backend for signal every 3s
 
 //+------------------------------------------------------------------+
 //| Global module pointers (heap allocated)                            |
@@ -62,6 +64,7 @@ int g_heartbeatCounter       = 0;
 int g_sessionCheckCounter    = 0;
 int g_orphanCheckCounter     = 0;
 int g_positionReportCounter  = 0;
+int g_signalScanCounter      = 0;
 
 //+------------------------------------------------------------------+
 //| New bar detection                                                  |
@@ -126,6 +129,76 @@ string BuildPositionStatusJson()
     json += "}";
 
     return json;
+}
+
+//+------------------------------------------------------------------+
+//| Helper: Build state transition request JSON                       |
+//+------------------------------------------------------------------+
+string BuildTransitionJson(EAState currentState, EAState requestedState, string reason)
+{
+    // Format timestamp
+    datetime now = TimeGMT();
+    MqlDateTime dt;
+    TimeToStruct(now, dt);
+    int ms = (int)(GetTickCount() % 1000);
+    string timestamp = StringFormat("%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                                   dt.year, dt.mon, dt.day,
+                                   dt.hour, dt.min, dt.sec, ms);
+
+    // Get state strings from StateMachine
+    string currentStateStr  = g_stateMachine.StateToString(currentState);
+    string requestedStateStr = g_stateMachine.StateToString(requestedState);
+
+    string json = "{";
+    json += "\"current_state\":\"" + currentStateStr + "\",";
+    json += "\"requested_state\":\"" + requestedStateStr + "\",";
+    json += "\"reason\":\"" + reason + "\",";
+    json += "\"timestamp\":\"" + timestamp + "\"";
+    json += "}";
+
+    return json;
+}
+
+//+------------------------------------------------------------------+
+//| Helper: Request state transition from backend                     |
+//| POSTs to /api/v1/state/transition and processes response          |
+//| Returns true if transition was approved by backend                |
+//+------------------------------------------------------------------+
+bool RequestBackendTransition(EAState currentState, EAState requestedState, string reason)
+{
+    if(g_httpClient == NULL || g_commandDispatcher == NULL)
+    {
+        if(g_logger != NULL)
+            g_logger.Error("EAGateway", "Cannot request transition: HttpClient or CommandDispatcher is NULL");
+        return false;
+    }
+
+    string json = BuildTransitionJson(currentState, requestedState, reason);
+
+    if(g_logger != NULL)
+    {
+        string fromStr = g_stateMachine.StateToString(currentState);
+        string toStr   = g_stateMachine.StateToString(requestedState);
+        g_logger.Info("EAGateway", "Requesting transition: " + fromStr + " -> " + toStr);
+    }
+
+    HttpResponse response = g_httpClient.Post(STATE_TRANSITION_ENDPOINT, json);
+
+    if(response.statusCode < 200 || response.statusCode >= 300)
+    {
+        if(g_logger != NULL)
+            g_logger.Warn("EAGateway", "Transition request failed. HTTP " +
+                         IntegerToString(response.statusCode));
+        return false;
+    }
+
+    // Pass response to CommandDispatcher (handles approval + embedded commands)
+    g_commandDispatcher.HandleStateResponse(response.body);
+    SyncCurrentState();
+
+    // Check if we actually transitioned to the requested state
+    EAState newState = g_stateMachine.GetCurrentState();
+    return (newState == requestedState);
 }
 
 //+------------------------------------------------------------------+
@@ -223,6 +296,7 @@ int OnInit()
     g_sessionCheckCounter   = 0;
     g_orphanCheckCounter    = 0;
     g_positionReportCounter = 0;
+    g_signalScanCounter     = 0;
 
     g_logger.Info("EAGateway", "EA Gateway initialized. Timer set (1s granularity).");
 
@@ -341,6 +415,7 @@ void OnTimer()
     g_sessionCheckCounter++;
     g_orphanCheckCounter++;
     g_positionReportCounter++;
+    g_signalScanCounter++;
 
     //--- Get current state for conditional logic
     EAState state = g_stateMachine.GetCurrentState();
@@ -391,6 +466,93 @@ void OnTimer()
                     SyncCurrentState();
                     g_logger.Info("EAGateway", "Session active. Transitioned to CHECK_RISK.");
                 }
+            }
+        }
+    }
+
+    //--- Signal scan: every SIGNAL_SCAN_INTERVAL_SEC (for CHECK_RISK, SCAN_SIGNAL, AI_CONFIRMATION)
+    if(g_signalScanCounter >= SIGNAL_SCAN_INTERVAL_SEC)
+    {
+        g_signalScanCounter = 0;
+
+        //--- CHECK_RISK → SCAN_SIGNAL: request backend to check risk and scan for signal
+        if(state == STATE_CHECK_RISK)
+        {
+            bool approved = RequestBackendTransition(STATE_CHECK_RISK, STATE_SCAN_SIGNAL, "risk_check_and_scan");
+            if(approved)
+            {
+                g_logger.Info("EAGateway", "Risk check passed. Transitioned to SCAN_SIGNAL.");
+            }
+            else
+            {
+                g_logger.Info("EAGateway", "Risk check rejected or session ended. Going back to WAIT_SESSION.");
+                g_stateMachine.TransitionTo(STATE_WAIT_SESSION, "risk_check_rejected");
+                SyncCurrentState();
+            }
+        }
+
+        //--- SCAN_SIGNAL → AI_CONFIRMATION: backend runs signal engine
+        else if(state == STATE_SCAN_SIGNAL)
+        {
+            bool approved = RequestBackendTransition(STATE_SCAN_SIGNAL, STATE_AI_CONFIRMATION, "signal_scan");
+            if(approved)
+            {
+                g_logger.Info("EAGateway", "Signal detected! Transitioned to AI_CONFIRMATION.");
+            }
+            else
+            {
+                // No signal detected → go back to WAIT_SESSION
+                g_stateMachine.TransitionTo(STATE_WAIT_SESSION, "no_signal_detected");
+                SyncCurrentState();
+                g_logger.Info("EAGateway", "No signal detected. Back to WAIT_SESSION.");
+            }
+        }
+
+        //--- AI_CONFIRMATION → OPEN_POSITION: backend approves trade + sends command
+        else if(state == STATE_AI_CONFIRMATION)
+        {
+            bool approved = RequestBackendTransition(STATE_AI_CONFIRMATION, STATE_OPEN_POSITION, "ai_approved");
+            if(approved)
+            {
+                g_logger.Info("EAGateway", "Trade approved! Transitioned to OPEN_POSITION.");
+                // CommandDispatcher already dispatched the trade command from the response
+            }
+            else
+            {
+                g_stateMachine.TransitionTo(STATE_WAIT_SESSION, "ai_rejected_trade");
+                SyncCurrentState();
+                g_logger.Info("EAGateway", "Trade rejected by AI. Back to WAIT_SESSION.");
+            }
+        }
+
+        //--- OPEN_POSITION → MANAGE_POSITION: check trade result from backend
+        else if(state == STATE_OPEN_POSITION)
+        {
+            bool approved = RequestBackendTransition(STATE_OPEN_POSITION, STATE_MANAGE_POSITION, "trade_confirmed");
+            if(approved)
+            {
+                g_logger.Info("EAGateway", "Trade confirmed. Transitioned to MANAGE_POSITION.");
+            }
+            else
+            {
+                g_logger.Info("EAGateway", "Trade result not yet confirmed. Waiting...");
+            }
+        }
+
+        //--- MANAGE_POSITION → POSITION_CLOSED: check if position is still open
+        else if(state == STATE_MANAGE_POSITION)
+        {
+            if(g_tradeExecutor != NULL && !g_tradeExecutor.HasOpenPosition())
+            {
+                // Position closed (SL/TP hit or manual close)
+                g_stateMachine.TransitionTo(STATE_POSITION_CLOSED, "position_closed");
+                SyncCurrentState();
+                g_logger.Info("EAGateway", "Position closed. Transitioned to POSITION_CLOSED.");
+
+                // Then go back to WAIT_SESSION
+                g_stateMachine.TransitionTo(STATE_WAIT_SESSION, "ready_for_next_session");
+                SyncCurrentState();
+                g_logger.Info("EAGateway", "Back to WAIT_SESSION. Ready for next signal.");
             }
         }
     }
