@@ -28,7 +28,7 @@ class CHealthMonitor
 private:
     CLogger*      m_logger;              // Pointer to logger instance
     CHttpClient*  m_httpClient;          // Pointer to HTTP client
-    EAState*      m_statePtr;            // Pointer to current EA state
+    // State is accessed via global g_currentState
 
     //--- Heartbeat state
     datetime      m_lastHeartbeatTime;   // Timestamp of last successful heartbeat
@@ -55,7 +55,7 @@ public:
                  ~CHealthMonitor();
 
     //--- Initialization
-    void          Init(CLogger* logger, CHttpClient* httpClient, EAState* statePtr);
+    void          Init(CLogger* logger, CHttpClient* httpClient);
 
     //--- Core health monitoring
     void          SendHeartbeat();            // Called by timer (every 30s)
@@ -78,7 +78,6 @@ CHealthMonitor::CHealthMonitor()
 {
     m_logger              = NULL;
     m_httpClient          = NULL;
-    m_statePtr            = NULL;
     m_lastHeartbeatTime   = 0;
     m_previousMT5Status   = true;   // Assume connected at start
     m_tradeExecutionPaused = false;
@@ -93,17 +92,15 @@ CHealthMonitor::~CHealthMonitor()
     // External references, do not delete
     m_logger     = NULL;
     m_httpClient = NULL;
-    m_statePtr   = NULL;
 }
 
 //+------------------------------------------------------------------+
 //| Init - Configure dependencies                                      |
 //+------------------------------------------------------------------+
-void CHealthMonitor::Init(CLogger* logger, CHttpClient* httpClient, EAState* statePtr)
+void CHealthMonitor::Init(CLogger* logger, CHttpClient* httpClient)
 {
     m_logger     = logger;
     m_httpClient = httpClient;
-    m_statePtr   = statePtr;
 
     // Initialize MT5 status based on current connectivity
     m_previousMT5Status = IsMT5Connected();
@@ -159,8 +156,7 @@ void CHealthMonitor::OnMT5Disconnect()
     if(m_httpClient != NULL)
     {
         string currentState = "";
-        if(m_statePtr != NULL)
-            currentState = StateToString(*m_statePtr);
+        currentState = StateToString(g_currentState);
 
         string json = "{";
         json += "\"event\":\"mt5_disconnected\",";
@@ -199,8 +195,7 @@ void CHealthMonitor::OnMT5Reconnect()
     if(m_httpClient != NULL)
     {
         string currentState = "";
-        if(m_statePtr != NULL)
-            currentState = StateToString(*m_statePtr);
+        currentState = StateToString(g_currentState);
 
         // Build reconnection payload with current state for sync
         string json = "{";
@@ -269,8 +264,7 @@ void CHealthMonitor::SendHeartbeat()
 string CHealthMonitor::SerializeHeartbeat()
 {
     string currentState = "";
-    if(m_statePtr != NULL)
-        currentState = StateToString(*m_statePtr);
+    currentState = StateToString(g_currentState);
 
     double balance  = AccountInfoDouble(ACCOUNT_BALANCE);
     double equity   = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -298,8 +292,7 @@ string CHealthMonitor::SerializeHeartbeat()
 string CHealthMonitor::GetHealthStatus()
 {
     string currentState = "";
-    if(m_statePtr != NULL)
-        currentState = StateToString(*m_statePtr);
+    currentState = StateToString(g_currentState);
 
     double balance  = AccountInfoDouble(ACCOUNT_BALANCE);
     double equity   = AccountInfoDouble(ACCOUNT_EQUITY);

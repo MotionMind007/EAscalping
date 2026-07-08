@@ -329,8 +329,8 @@ bool CLogger::ShouldRotate()
     // Check size-based rotation
     if(m_fileHandle != INVALID_HANDLE)
     {
-        long fileSize = FileSize(m_fileHandle);
-        long maxBytes = (long)m_maxFileSizeMB * 1024 * 1024;
+        ulong fileSize = FileSize(m_fileHandle);
+        ulong maxBytes = (ulong)m_maxFileSizeMB * 1024 * 1024;
         if(fileSize >= maxBytes)
             return true;
     }

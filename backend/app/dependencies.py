@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from redis.asyncio import ConnectionPool, Redis
 from sqlalchemy.ext.asyncio import (
     AsyncSession,

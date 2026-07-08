@@ -27,7 +27,7 @@ private:
     CLogger*      m_logger;              // Pointer to logger instance
     CHttpClient*  m_httpClient;          // Pointer to HTTP client
     string        m_timeframe;           // Configured timeframe string (M1, M5, etc.)
-    EAState*      m_statePtr;            // Pointer to current EA state
+    // State is accessed via global g_currentState
 
     //--- Tick batching state
     TickData      m_tickBuffer[];        // Buffer for batching (max 10)
@@ -52,7 +52,7 @@ public:
                  ~CMarketCollector();
 
     //--- Initialization
-    void          Init(CLogger* logger, CHttpClient* httpClient, string timeframe, EAState* statePtr);
+    void          Init(CLogger* logger, CHttpClient* httpClient, string timeframe);
 
     //--- Core methods
     void          OnTick();               // Called every tick
@@ -75,7 +75,7 @@ CMarketCollector::CMarketCollector()
     m_logger           = NULL;
     m_httpClient       = NULL;
     m_timeframe        = "M1";
-    m_statePtr         = NULL;
+    // No state pointer needed
     m_tickCount        = 0;
     m_batchStartTickMs = 0;
     ArrayResize(m_tickBuffer, MARKET_MAX_BATCH_SIZE);
@@ -89,18 +89,17 @@ CMarketCollector::~CMarketCollector()
     // Not owned, do not delete
     m_logger     = NULL;
     m_httpClient = NULL;
-    m_statePtr   = NULL;
+    // No state pointer needed
 }
 
 //+------------------------------------------------------------------+
 //| Init - Configure the market collector with dependencies            |
 //+------------------------------------------------------------------+
-void CMarketCollector::Init(CLogger* logger, CHttpClient* httpClient, string timeframe, EAState* statePtr)
+void CMarketCollector::Init(CLogger* logger, CHttpClient* httpClient, string timeframe)
 {
     m_logger     = logger;
     m_httpClient = httpClient;
     m_timeframe  = timeframe;
-    m_statePtr   = statePtr;
     m_tickCount  = 0;
     m_batchStartTickMs = 0;
 
@@ -115,10 +114,7 @@ void CMarketCollector::Init(CLogger* logger, CHttpClient* httpClient, string tim
 //+------------------------------------------------------------------+
 bool CMarketCollector::IsStateAllowed()
 {
-    if(m_statePtr == NULL)
-        return false;
-
-    EAState currentState = *m_statePtr;
+    EAState currentState = g_currentState;
 
     // Only allowed after CONNECT state (not BOOT, not CONNECT)
     if(currentState == STATE_BOOT || currentState == STATE_CONNECT)

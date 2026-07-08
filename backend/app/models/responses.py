@@ -60,8 +60,8 @@ class HealthResponse(BaseModel):
     ea_connected: bool = Field(
         ..., description="Whether EA heartbeat is recent (< 90 seconds)"
     )
-    last_heartbeat_age_seconds: float = Field(
-        ..., ge=0, description="Seconds since last heartbeat"
+    last_heartbeat_age_seconds: float | None = Field(
+        None, ge=0, description="Seconds since last heartbeat"
     )
     redis_connected: bool = Field(..., description="Whether Redis is reachable")
     postgres_connected: bool = Field(..., description="Whether PostgreSQL is reachable")

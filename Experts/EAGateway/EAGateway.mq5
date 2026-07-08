@@ -51,7 +51,7 @@ CSessionAbortHandler* g_sessionAbortHandler = NULL;
 CCommandDispatcher*   g_commandDispatcher = NULL;
 
 //+------------------------------------------------------------------+
-//| Global state variable (for modules that take EAState* pointer)    |
+//| Global state variable (accessed by modules via extern)            |
 //+------------------------------------------------------------------+
 EAState g_currentState = STATE_BOOT;
 
@@ -173,13 +173,13 @@ int OnInit()
     SyncCurrentState();
 
     // MarketCollector
-    g_marketCollector.Init(g_logger, g_httpClient, g_configManager.GetTimeframe(), &g_currentState);
+    g_marketCollector.Init(g_logger, g_httpClient, g_configManager.GetTimeframe());
 
     // TradeExecutor
     g_tradeExecutor.Init(g_logger, g_httpClient);
 
     // HealthMonitor
-    g_healthMonitor.Init(g_logger, g_httpClient, &g_currentState);
+    g_healthMonitor.Init(g_logger, g_httpClient);
 
     // RecoveryManager
     g_recoveryManager.Init(g_stateMachine, g_httpClient, g_logger);

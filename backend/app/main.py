@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     Shutdown: close Redis connection and dispose engine pool.
     """
     # Initialize Redis using the wrapper's lifespan
-    with dependencies.redis_lifespan(app):
+    async with dependencies.redis_lifespan(app):
         settings: Settings = get_settings()
 
         # ─── Initialize PostgreSQL (SQLAlchemy async) ─────────────────────

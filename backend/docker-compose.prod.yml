@@ -1,0 +1,10 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_scalping_backend
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
