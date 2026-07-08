@@ -54,7 +54,7 @@ CStateMachine::CStateMachine(CLogger *logger)
     InitTransitionTable();
 
     if(m_logger != NULL)
-        m_logger->Info("StateMachine", "State machine initialized in BOOT state");
+        m_logger.Info("StateMachine", "State machine initialized in BOOT state");
 }
 
 //+------------------------------------------------------------------+
@@ -203,7 +203,7 @@ bool CStateMachine::TransitionTo(EAState newState, string reason)
                          StateToString(m_currentState) + " → " +
                          StateToString(newState) +
                          " (reason: " + reason + ")";
-            m_logger->Warn("StateMachine", msg);
+            m_logger.Warn("StateMachine", msg);
         }
         return false;
     }
@@ -215,8 +215,8 @@ bool CStateMachine::TransitionTo(EAState newState, string reason)
     // Log the successful transition
     if(m_logger != NULL)
     {
-        m_logger->LogStateTransition(previousState, newState, reason);
-        m_logger->SetCurrentState(newState);
+        m_logger.LogStateTransition(previousState, newState, reason);
+        m_logger.SetCurrentState(newState);
     }
 
     return true;
@@ -262,7 +262,7 @@ EAState CStateMachine::StringToState(string stateStr)
 
     // Unrecognized string - return BOOT as safe default
     if(m_logger != NULL)
-        m_logger->Warn("StateMachine", "Unrecognized state string: " + stateStr + ", defaulting to BOOT");
+        m_logger.Warn("StateMachine", "Unrecognized state string: " + stateStr + ", defaulting to BOOT");
 
     return STATE_BOOT;
 }

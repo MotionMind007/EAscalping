@@ -9,26 +9,26 @@
 #property strict
 
 //+------------------------------------------------------------------+
-//| Global state - defined before includes so modules can access it    |
-//+------------------------------------------------------------------+
-EAState g_currentState = STATE_BOOT;
-
-//+------------------------------------------------------------------+
 //| Include all modules                                                |
 //+------------------------------------------------------------------+
-#include <EAGateway\Types.mqh>
-#include <EAGateway\Inputs.mqh>
-#include <EAGateway\ConfigManager.mqh>
-#include <EAGateway\Logger.mqh>
-#include <EAGateway\StateMachine.mqh>
-#include <EAGateway\HttpClient.mqh>
-#include <EAGateway\MarketCollector.mqh>
-#include <EAGateway\TradeExecutor.mqh>
-#include <EAGateway\HealthMonitor.mqh>
-#include <EAGateway\SessionManager.mqh>
-#include <EAGateway\RecoveryManager.mqh>
-#include <EAGateway\SessionAbortHandler.mqh>
-#include <EAGateway\CommandDispatcher.mqh>
+#include <EAGateway\\Types.mqh>
+#include <EAGateway\\Inputs.mqh>
+#include <EAGateway\\ConfigManager.mqh>
+#include <EAGateway\\Logger.mqh>
+#include <EAGateway\\StateMachine.mqh>
+#include <EAGateway\\HttpClient.mqh>
+#include <EAGateway\\MarketCollector.mqh>
+#include <EAGateway\\TradeExecutor.mqh>
+#include <EAGateway\\HealthMonitor.mqh>
+#include <EAGateway\\SessionManager.mqh>
+#include <EAGateway\\RecoveryManager.mqh>
+#include <EAGateway\\SessionAbortHandler.mqh>
+#include <EAGateway\\CommandDispatcher.mqh>
+
+//+------------------------------------------------------------------+
+//| Global state - defined AFTER includes so EAState type is known     |
+//+------------------------------------------------------------------+
+EAState g_currentState = STATE_BOOT;
 
 //+------------------------------------------------------------------+
 //| Constants                                                          |
